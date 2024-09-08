@@ -35,6 +35,7 @@ class User(Base):
     user_id = Column(Integer, unique=True)
     user_name = Column(String)
 
+
 # Создание подключения к базе данных
 engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(
@@ -44,7 +45,10 @@ AsyncSessionLocal = sessionmaker(
 # Создание таблиц
 async def init_db():
     async with engine.begin() as conn:
+        logging.info("Начало создания таблиц...")
         await conn.run_sync(Base.metadata.create_all)
+        logging.info("Таблицы успешно созданы.")
+
 
 # Инициализация базы данных
 asyncio.run(init_db())
@@ -262,9 +266,10 @@ async def handle_phone_number(message: types.Message):
         await message.reply(response, parse_mode='HTML')
 
     except phonenumbers.NumberParseException as e:
-        await message.reply(f"Ошибка: Неверный формат номера телефона. Убедитесь, что номер в международном формате.")
+        await message.reply("Ошибка: Неверный формат номера телефона. Убедитесь, что номер в международном формате.")
         await notify_admins(f"Ошибка разбора номера от пользователя {message.from_user.id}: {str(e)}")
         logging.error(f"Ошибка разбора номера: {e}")
+
 
     except ValueError as e:
         await message.reply(f"Ошибка: {str(e)}")
