@@ -6,8 +6,8 @@ import phonenumbers
 from phonenumbers import geocoder, carrier
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import BotCommand
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
+# from aiogram.fsm.state import State, StatesGroup
+# from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -15,18 +15,18 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 from aiogram.filters import Command
 
-# Загрузка переменных окружения
+# Load environment variables
 load_dotenv()
 
-# Получение значений переменных
+# Get values from environment
 API_TOKEN = os.getenv('API_TOKEN')
-ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS').split(',')))  # Обработка списка ID
+ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS').split(',')))  # Process list of IDs
 DATABASE_URL = os.getenv('SQLALCHEMY_URL')
 
-# Настройка логирования
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 
-# Создание модели и базы данных
+# Create the model and database
 Base = declarative_base()
 
 class User(Base):
@@ -35,105 +35,92 @@ class User(Base):
     user_id = Column(Integer, unique=True)
     user_name = Column(String)
 
-
-# Создание подключения к базе данных
+# Create a database connection
 engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(
-    bind=engine, class_=AsyncSession, expire_on_commit=False
-)
+AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
-# Создание таблиц
+# Create tables
 async def init_db():
     async with engine.begin() as conn:
-        logging.info("Начало создания таблиц...")
+        logging.info("Creating tables...")
         await conn.run_sync(Base.metadata.create_all)
-        logging.info("Таблицы успешно созданы.")
+        logging.info("Tables created successfully.")
 
-
-# Инициализация базы данных
+# Initialize database
 asyncio.run(init_db())
 
-# Инициализация бота и диспетчера
+# Initialize bot and dispatcher
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Установка команд
+# Set commands
 async def set_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="Запустить бота"),
-        BotCommand(command="admin", description="Панель администратора"),
-        BotCommand(command="id", description="Получение ID")
+        BotCommand(command="start", description="Start the bot"),
+        BotCommand(command="admin", description="Admin panel"),
+        BotCommand(command="id", description="Get your ID")
     ]
     await bot.set_my_commands(commands)
 
-# Функция для проверки и форматирования номера
+# Function to format phone number
 def format_phone_number(phone_number: str) -> str:
-    cleaned_number = re.sub(r'\D', '', phone_number)  # Удаляем все нецифровые символы
-    if len(cleaned_number) == 9:  # Если номер состоит из 9 цифр
-        cleaned_number = f'+998{cleaned_number}'  # Добавляем код страны для Узбекистана
-    elif not cleaned_number.startswith('+'):  # Если нет символа +
+    cleaned_number = re.sub(r'\D', '', phone_number)  # Remove non-numeric characters
+    if len(cleaned_number) == 9:  # If the number consists of 9 digits
+        cleaned_number = f'+998{cleaned_number}'  # Add country code for Uzbekistan
+    elif not cleaned_number.startswith('+'):  # If it doesn't start with +
         cleaned_number = f'+{cleaned_number}'
     return cleaned_number
 
-# Функция для получения информации о номере телефона
+# Function to generate search URLs
+def generate_search_urls(phone_number: str):
+    query = f"{phone_number}"
+    google_url = f"https://www.google.com/search?q={query}"
+    yandex_url = f"https://yandex.com/search/?text={query}"
+    youtube_url = f"https://www.youtube.com/results?search_query={query}"
+    orginfo_url = f"https://orginfo.uz/uz/search/all/?q={query}" 
+    reyting_url = f"https://reyting.mc.uz/new-ratings?type=0&page=1&stir={query}" 
+    gov_uz_url = f"https://my.gov.uz/oz/service/all-services?ServiceFilterForm%5Ball_title%5D={query}" 
+    return google_url, yandex_url, youtube_url, orginfo_url, reyting_url, gov_uz_url
+
+# Function for getting phone info
 def get_phone_info(phone_number: str):
     phone_number_obj = phonenumbers.parse(phone_number)
     country = geocoder.description_for_number(phone_number_obj, "en")
     operator = carrier.name_for_number(phone_number_obj, "en")
     return country, operator
 
-# Функция для генерации ссылки на Telegram
+# Function to generate Telegram link
 def generate_telegram_link(phone_number: str) -> str:
     return f"https://t.me/{phone_number}"
 
-# Функция для генерации ссылки на WhatsApp
+# Function to generate WhatsApp link
 def generate_whatsapp_link(phone_number: str) -> str:
     return f"https://wa.me/{phone_number}"
 
-# Функция для получения информации о пользователе Telegram
-async def get_telegram_user_info(user_id: int):
-    try:
-        user = await bot.get_chat(user_id)
-        user_info = {
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "username": user.username,
-            "id": user.id
-        }
-        return user_info
-    except Exception as e:
-        return str(e)
-
-# Функция для отправки сообщения админу
+# Function for sending admin notifications
 async def notify_admins(message: str):
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, message)
         except Exception as e:
-            logging.error(f"Не удалось отправить сообщение админу {admin_id}: {e}")
+            logging.error(f"Failed to send message to admin {admin_id}: {e}")
 
-# Обработчик команды /start
+# Handler for the /start command
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
     user_id = message.from_user.id
     user_name = message.from_user.full_name
     username = message.from_user.username
 
-    # Формирование ссылки на Telegram профиль пользователя через username
+    # Create Telegram profile link for the user
     if username:
         user_link = f'<a href="https://t.me/{username}">{user_name}</a>'
     else:
-        user_link = f'{user_name} (Username отсутствует)'
-
-
-
+        user_link = f'{user_name} (Username Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚)'
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            # Проверяем, существует ли пользователь
-            result = await session.execute(
-                select(User).filter(User.user_id == user_id)
-            )
+            result = await session.execute(select(User).filter(User.user_id == user_id))
             existing_user = result.scalars().first()
 
             if not existing_user:
@@ -141,114 +128,59 @@ async def send_welcome(message: types.Message):
                 session.add(new_user)
                 await session.commit()
 
-            # Подсчёт количества пользователей
-            result = await session.execute(
-                select(User.id)
-            )
+            # Count total users
+            result = await session.execute(select(User.id))
             user_count = len(result.scalars().all())
 
-    # Отправка сообщения админу с ссылкой на профиль пользователя
+    # Notify admin about new user
     await notify_admins(
-        f"Пользователь {user_link} (ID: {user_id}) нажал /start. Всего пользователей: {user_count}"
+        f"User {user_link} (ID: {user_id}) started the bot. Total users: {user_count}"
     )
-    # Отправка сообщения админу
-    # await notify_admins(f"Пользователь {user_name} (ID: {user_id}) нажал /start. Всего пользователей: {user_count}")
 
-
-
-
-    # Ответ пользователю
+    # Reply to the user
     if user_id in ADMIN_IDS:
-        await message.answer("Привет, администратор! Используйте команду /admin для отправки сообщений всем пользователям.")
+        await message.answer("ÐŸÑ€Ð¸Ð²ÐµÑ‚, Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€! Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐ¹Ñ‚Ðµ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñƒ /admin Ð´Ð»Ñ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð²ÑÐµÐ¼ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑÐ¼.")
     else:
-        await message.answer("Привет! Отправьте мне любой номер телефона, и я создам ссылки на Telegram и WhatsApp.")
-
-# Функция для отправки сообщений всем пользователям
-async def broadcast_message(content: str):
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(User.user_id))
-        user_ids = [row[0] for row in result.fetchall()]
-
-    if not user_ids:
-        logging.warning("Нет пользователей для отправки сообщения.")
-        return
-
-    logging.info(f"Найдено {len(user_ids)} пользователей. Начинаем отправку сообщения.")
-
-    # batch_size = 50  # Размер пакета сообщений
-    # for i in range(0, len(user_ids), batch_size):
-    #     batch = user_ids[i:i + batch_size]
-    #     for user_id in batch:
-    #         try:
-    #             response = await bot.send_message(user_id, content)
-    #             logging.info(f"Сообщение отправлено пользователю {user_id}. Ответ от API: {response}")
-    #         except Exception as e:
-    #             logging.error(f"Не удалось отправить сообщение пользователю {user_id}: {string(e0}")
-    async def send_message(user_id):
-        try:
-            await bot.send_message(user_id, content)
-            logging.info(f"Сообщение отправлено пользователю {user_id}")
-        except Exception as e:
-            logging.error(f"Не удалось отправить сообщение пользователю {user_id}: {str(e)}")
-
-    await asyncio.gather(*[send_message(user_id) for user_id in user_ids])
-
-
-    logging.info("Сообщение отправлено всем пользователям.")
-
-class AdminStates(StatesGroup):
-    waiting_for_message = State()
-
-@dp.message(Command("admin"))
-async def admin_command_handler(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(select(User.user_id))
-            user_ids = [row[0] for row in result.fetchall()]
-
-        await message.answer(f"Введите сообщение, которое вы хотите отправить всем пользователям. Количество пользователей: {len(user_ids)}")
-        await AdminStates.waiting_for_message.set()  # Устанавливаем состояние ожидания сообщения
-    else:
-        await message.answer("У вас нет доступа к этой команде.")
-
-@dp.message(AdminStates.waiting_for_message)
-async def handle_admin_message(message: types.Message, state: FSMContext):
-    if message.from_user.id in ADMIN_IDS:
-        content = message.text.strip()
-
-        if content:
-            await broadcast_message(content)
-            await message.answer("Сообщение отправлено всем пользователям.")
-        else:
-            await message.answer("Сообщение не может быть пустым.")
-
-        await state.clear()  # Очищаем состояние после отправки
-    else:
-        await message.answer("У вас нет доступа к этой команде.")
-        await state.clear()  # На случай, если кто-то неадекватно использует
+        await message.answer("ÐŸÑ€Ð¸Ð²ÐµÑ‚! ÐžÑ‚Ð¿Ñ€Ð°Ð²ÑŒÑ‚Ðµ Ð¼Ð½Ðµ Ð»ÑŽÐ±Ð¾Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð°, Ð¸ Ñ ÑÐ¾Ð·Ð´Ð°Ð¼ ÑÑÑ‹Ð»ÐºÐ¸ Ð½Ð° Telegram Ð¸ WhatsApp.")
 
 
 
-# /id yuborganda foydalanuvchining id sini chiqaradi
-@dp.message(Command("id"))
-async def cmd_start(message: types.Message):
-    await message.answer(f'{message.from_user.id}')
 
-
-# Обработка номера телефона для всех остальных случаев
+# Handle phone number input
 @dp.message()
 async def handle_phone_number(message: types.Message):
     phone_number = message.text.strip()
     formatted_phone_number = format_phone_number(phone_number)
 
-    logging.info(f"Получен номер телефона: {phone_number}")
-    logging.info(f"Форматированный номер телефона: {formatted_phone_number}")
+    logging.info(f"Received phone number: {phone_number}")
+    logging.info(f"Formatted phone number: {formatted_phone_number}")
+
+    # Remove non-digit characters for checking
+    cleaned_number = re.sub(r'\D', '', phone_number)
 
     try:
         phone_number_obj = phonenumbers.parse(formatted_phone_number)
-        if not phonenumbers.is_valid_number(phone_number_obj):
-            raise ValueError("Некорректный номер телефона.")
 
+        # Check if the number is valid
+        if not phonenumbers.is_valid_number(phone_number_obj):
+            # Handle the case when the number is not valid
+            if len(cleaned_number) == 9:
+                # Generate search URLs for the 9-digit number on reyting.mc.uz and orginfo.uz
+                reyting_url = f"https://reyting.mc.uz/new-ratings?type=0&page=1&stir={cleaned_number}"
+                orginfo_url = f"https://orginfo.uz/uz/search/all/?q={cleaned_number}"
+
+                await message.reply(
+                    f"ÐžÑˆÐ¸Ð±ÐºÐ°: ÐÐµÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð°. ÐÐ¾ Ð½Ð¾Ð¼ÐµÑ€ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ñ‚ 9 Ñ†Ð¸Ñ„Ñ€.\n"
+                    f"Ð’Ð¾Ñ‚ ÑÑÑ‹Ð»ÐºÐ¸ Ð´Ð»Ñ Ð¿Ð¾Ð¸ÑÐºÐ° Ð½Ð¾Ð¼ÐµÑ€Ð°:\n"
+                    f"*Tashkilotlar reytingi haqida ma'lumot*ðŸ“Š [Reyting]({reyting_url})\n"
+                    f"*Tashkilotlar haqida ma'lumot*ðŸ“‹ [Orginfo.uz]({orginfo_url})",
+                    parse_mode='Markdown'
+                )
+                return  # Stop further processing
+            else:
+                raise ValueError("ÐÐµÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð°.")
+        
+        # If the number is valid, proceed to gather additional info
         country = geocoder.description_for_number(phone_number_obj, "en")
         operator = carrier.name_for_number(phone_number_obj, "en")
 
@@ -256,9 +188,9 @@ async def handle_phone_number(message: types.Message):
         whatsapp_link = generate_whatsapp_link(formatted_phone_number)
 
         response = (
-            f"Телефон: {formatted_phone_number}\n"
-            f"Страна: {country}\n"
-            f"Оператор: {operator}\n"
+            f"Ð¢ÐµÐ»ÐµÑ„Ð¾Ð½: {formatted_phone_number}\n"
+            f"Ð¡Ñ‚Ñ€Ð°Ð½Ð°: {country}\n"
+            f"ÐžÐ¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€: {operator}\n"
             f"Telegram: {telegram_link}\n"
             f"WhatsApp: {whatsapp_link}\n"
         )
@@ -266,31 +198,58 @@ async def handle_phone_number(message: types.Message):
         await message.reply(response, parse_mode='HTML')
 
     except phonenumbers.NumberParseException as e:
-        await message.reply("Ошибка: Неверный формат номера телефона. Убедитесь, что номер в международном формате.")
-        await notify_admins(f"Ошибка разбора номера от пользователя {message.from_user.id}: {str(e)}")
-        logging.error(f"Ошибка разбора номера: {e}")
+        logging.info(f"Cleaned number for parsing: {cleaned_number}")  # Log cleaned number
 
+        if len(cleaned_number) == 9:
+            # Generate search URLs for the 9-digit number on reyting.mc.uz and orginfo.uz
+            reyting_url = f"https://reyting.mc.uz/new-ratings?type=0&page=1&stir={cleaned_number}"
+            orginfo_url = f"https://orginfo.uz/uz/search/all/?q={cleaned_number}"
+
+            await message.reply(
+                f"ÐžÑˆÐ¸Ð±ÐºÐ°: ÐÐµÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð°. ÐÐ¾ Ð½Ð¾Ð¼ÐµÑ€ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ñ‚ 9 Ñ†Ð¸Ñ„Ñ€.\n"
+                f"Ð’Ð¾Ñ‚ ÑÑÑ‹Ð»ÐºÐ¸ Ð´Ð»Ñ Ð¿Ð¾Ð¸ÑÐºÐ° Ð½Ð¾Ð¼ÐµÑ€Ð°:\n"
+                f"*Tashkilotlar reytingi haqida ma'lumot*ðŸ“Š [Reyting]({reyting_url})\n"
+                f"*Tashkilotlar haqida*ðŸ“‹ [Orginfo.uz]({orginfo_url})",
+                parse_mode='Markdown'
+            )
+        else:
+            # Generate general search URLs if not 9 digits
+            google_url = f"https://www.google.com/search?q={phone_number}"
+            yandex_url = f"https://yandex.com/search/?text={phone_number}"
+            youtube_url = f"https://www.youtube.com/results?search_query={phone_number}"
+            orginfo_url = f"https://orginfo.uz/uz/search/all/?q={phone_number}"
+            gov_uz_url = f"https://my.gov.uz/oz/service/all-services?ServiceFilterForm%5Ball_title%5D={phone_number}"
+
+            search_response = (
+                f"ÐžÑˆÐ¸Ð±ÐºÐ°: ÐÐµÐ²ÐµÑ€Ð½Ñ‹Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ Ð½Ð¾Ð¼ÐµÑ€Ð° Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð°.\n"
+                f"Ð’Ð¾Ñ‚ ÑÑÑ‹Ð»ÐºÐ¸ Ð´Ð»Ñ Ð¿Ð¾Ð¸ÑÐºÐ° Ð½Ð¾Ð¼ÐµÑ€Ð°:\n"
+                f"ðŸ” [Google]({google_url})\n"
+                f"ðŸ” [Yandex]({yandex_url})\n"
+                f"ðŸŽ¥ [YouTube]({youtube_url})\n"
+                f"*Tashkilot haqida malumot*ðŸ“‹ [Orginfo.uz]({orginfo_url})\n"
+                f"*Hukumat portali*ðŸ“‹ [My.gov.uz]({gov_uz_url})\n"
+            )
+            await message.reply(search_response, parse_mode='Markdown')
+
+        await notify_admins(f"Parsing error for number from user {message.from_user.id}: {str(e)}")
+        logging.error(f"Parsing error: {e}")
 
     except ValueError as e:
-        await message.reply(f"Ошибка: {str(e)}")
-        await notify_admins(f"Ошибка проверки номера от пользователя {message.from_user.id}: {str(e)}")
+        await message.reply(f"ÐžÑˆÐ¸Ð±ÐºÐ°: {str(e)}")
+        await notify_admins(f"Validation error for number from user {message.from_user.id}: {str(e)}")
 
     except Exception as e:
-        await message.reply(f"Ошибка: {str(e)}")
-        await notify_admins(f"Общая ошибка от пользователя {message.from_user.id}: {str(e)}")
+        await message.reply(f"ÐžÑˆÐ¸Ð±ÐºÐ°: {str(e)}")
+        await notify_admins(f"General error from user {message.from_user.id}: {str(e)}")
 
-# Функция для закрытия сессий
-async def shutdown(bot: Bot):
-    await bot.session.close()
 
-# Точка входа
+# Start the bot
 async def main():
     try:
         await set_commands(bot)
         await dp.start_polling(bot)
     finally:
-        await shutdown(bot)
+        await bot.session.close()
 
 if __name__ == '__main__':
-    asyncio.run(init_db())
     asyncio.run(main())
